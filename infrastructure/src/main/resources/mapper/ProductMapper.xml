@@ -1,0 +1,75 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="com.example.sampleec.infrastructure.mapper.ProductMapper">
+
+    <resultMap id="productResultMap" type="com.example.sampleec.infrastructure.entity.ProductTableEntity">
+        <id property="id" column="id"/>
+        <result property="name" column="name"/>
+        <result property="description" column="description"/>
+        <result property="price" column="price"/>
+        <result property="currency" column="currency"/>
+        <result property="stock" column="stock"/>
+        <result property="category" column="category"/>
+        <result property="imageUrl" column="image_url"/>
+        <result property="version" column="version"/>
+        <result property="createdAt" column="created_at"/>
+        <result property="updatedAt" column="updated_at"/>
+    </resultMap>
+
+    <select id="findAll" resultMap="productResultMap">
+        SELECT id, name, description, price, currency, stock, category, image_url, version, created_at, updated_at
+        FROM products
+        ORDER BY created_at DESC
+        LIMIT #{limit} OFFSET #{offset}
+    </select>
+
+    <select id="findByCategory" resultMap="productResultMap">
+        SELECT id, name, description, price, currency, stock, category, image_url, version, created_at, updated_at
+        FROM products
+        WHERE category = #{category}
+        ORDER BY created_at DESC
+        LIMIT #{limit} OFFSET #{offset}
+    </select>
+
+    <select id="countAll" resultType="long">
+        SELECT COUNT(*) FROM products
+    </select>
+
+    <select id="countByCategory" resultType="long">
+        SELECT COUNT(*) FROM products WHERE category = #{category}
+    </select>
+
+    <select id="findById" resultMap="productResultMap">
+        SELECT id, name, description, price, currency, stock, category, image_url, version, created_at, updated_at
+        FROM products
+        WHERE id = #{id}
+    </select>
+
+    <select id="findByIds" resultMap="productResultMap">
+        SELECT id, name, description, price, currency, stock, category, image_url, version, created_at, updated_at
+        FROM products
+        WHERE id IN
+        <foreach collection="ids" item="id" open="(" separator="," close=")">
+            #{id}
+        </foreach>
+    </select>
+
+    <!-- 楽観ロック付き在庫更新 -->
+    <update id="updateStockWithLock">
+        UPDATE products
+        SET stock   = stock - #{quantity},
+            version = version + 1
+        WHERE id = #{id}
+          AND version = #{version}
+          AND stock >= #{quantity}
+    </update>
+
+    <insert id="insert" parameterType="com.example.sampleec.infrastructure.entity.ProductTableEntity">
+        INSERT INTO products (id, name, description, price, currency, stock, category, image_url, version, created_at, updated_at)
+        VALUES (#{id}, #{name}, #{description}, #{price}, #{currency}, #{stock}, #{category}, #{imageUrl}, #{version},
+                #{createdAt}, #{updatedAt})
+    </insert>
+
+</mapper>

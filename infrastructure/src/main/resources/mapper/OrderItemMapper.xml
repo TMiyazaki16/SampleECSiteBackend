@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="com.example.sampleec.infrastructure.mapper.OrderItemMapper">
+
+    <resultMap id="orderItemResultMap" type="com.example.sampleec.infrastructure.entity.OrderItemTableEntity">
+        <id property="id" column="id"/>
+        <result property="orderId" column="order_id"/>
+        <result property="productId" column="product_id"/>
+        <result property="quantity" column="quantity"/>
+        <result property="unitPrice" column="unit_price"/>
+    </resultMap>
+
+    <select id="findByOrderId" resultMap="orderItemResultMap">
+        SELECT id, order_id, product_id, quantity, unit_price
+        FROM order_items
+        WHERE order_id = #{orderId}
+    </select>
+
+    <!-- N+1 回避：複数注文の明細を一括取得 -->
+    <select id="findByOrderIds" resultMap="orderItemResultMap">
+        SELECT id, order_id, product_id, quantity, unit_price
+        FROM order_items
+        WHERE order_id IN
+        <foreach collection="orderIds" item="orderId" open="(" separator="," close=")">
+            #{orderId}
+        </foreach>
+    </select>
+
+    <insert id="insertAll">
+        INSERT INTO order_items (id, order_id, product_id, quantity, unit_price)
+        VALUES
+        <foreach collection="items" item="item" separator=",">
+            (#{item.id}, #{item.orderId}, #{item.productId}, #{item.quantity}, #{item.unitPrice})
+        </foreach>
+    </insert>
+
+</mapper>

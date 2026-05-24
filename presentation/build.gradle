@@ -1,0 +1,34 @@
+apply plugin: 'org.springframework.boot'
+
+configurations {
+    all {
+        // Log4j2 と Logback の競合を避けるため Logback を除外
+        exclude group: 'org.springframework.boot', module: 'spring-boot-starter-logging'
+    }
+}
+
+dependencies {
+    implementation project(':application-core')
+    implementation project(':infrastructure')
+    implementation project(':system-common')
+
+    implementation 'org.springframework.boot:spring-boot-starter-web'
+    implementation 'org.springframework.boot:spring-boot-starter-security'
+    implementation 'org.springframework.boot:spring-boot-starter-validation'
+    implementation 'org.springframework.boot:spring-boot-starter-log4j2'
+
+    // JWT
+    implementation 'io.jsonwebtoken:jjwt-api:0.12.6'
+    runtimeOnly 'io.jsonwebtoken:jjwt-impl:0.12.6'
+    runtimeOnly 'io.jsonwebtoken:jjwt-jackson:0.12.6'
+
+    // OpenAPI / Swagger UI
+    implementation 'org.springdoc:springdoc-openapi-starter-webmvc-ui:2.4.0'
+
+    // H2 (開発・テスト用)
+    runtimeOnly 'com.h2database:h2'
+}
+
+bootRun {
+    jvmArgs = ['-Dfile.encoding=UTF-8']
+}

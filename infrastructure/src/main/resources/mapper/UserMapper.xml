@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="com.example.sampleec.infrastructure.mapper.UserMapper">
+
+    <resultMap id="userResultMap" type="com.example.sampleec.infrastructure.entity.UserTableEntity">
+        <id property="id" column="id"/>
+        <result property="email" column="email"/>
+        <result property="password" column="password"/>
+        <result property="name" column="name"/>
+        <result property="companyName" column="company_name"/>
+        <result property="role" column="role"/>
+        <result property="createdAt" column="created_at"/>
+        <result property="updatedAt" column="updated_at"/>
+    </resultMap>
+
+    <select id="findByEmail" resultMap="userResultMap">
+        SELECT id, email, password, name, company_name, role, created_at, updated_at
+        FROM users
+        WHERE email = #{email}
+    </select>
+
+    <select id="findById" resultMap="userResultMap">
+        SELECT id, email, password, name, company_name, role, created_at, updated_at
+        FROM users
+        WHERE id = #{id}
+    </select>
+
+    <insert id="insert" parameterType="com.example.sampleec.infrastructure.entity.UserTableEntity">
+        INSERT INTO users (id, email, password, name, company_name, role, created_at, updated_at)
+        VALUES (#{id}, #{email}, #{password}, #{name}, #{companyName}, #{role}, #{createdAt}, #{updatedAt})
+    </insert>
+
+</mapper>
