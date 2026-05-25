@@ -471,7 +471,7 @@ npm run dev
 
 http://localhost:5173 でブラウザ確認。
 
-> `.env.local` が `.env.development`（`VITE_API_BASE_URL=http://localhost:5173/api`）より優先されるため、MSW（Mock Service Worker）は自動的に無効化され、実際のバックエンドへリクエストが送られる。
+> `.env.backend` が `.env.development`（`VITE_API_BASE_URL=http://localhost:5173/api`）より優先されるため、MSW（Mock Service Worker）は自動的に無効化され、実際のバックエンドへリクエストが送られる。
 
 ---
 
