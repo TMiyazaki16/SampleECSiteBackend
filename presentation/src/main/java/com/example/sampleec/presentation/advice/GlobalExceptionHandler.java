@@ -9,6 +9,8 @@ import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.servlet.NoHandlerFoundException;
+import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 import java.util.stream.Collectors;
 
@@ -43,6 +45,20 @@ public class GlobalExceptionHandler {
         return ResponseEntity
                 .status(HttpStatus.BAD_REQUEST)
                 .body(new ErrorResponse(message));
+    }
+
+    /**
+     * 存在しないパスへのアクセスのハンドリング。
+     * Spring MVC が静的リソース・ハンドラーのいずれにも解決できなかった場合に送出される。
+     * 下の handleException(Exception) に拾われると 500 になってしまうため、
+     * 明示的に 404 を返して監視アラートのノイズを防ぐ。
+     */
+    @ExceptionHandler({NoResourceFoundException.class, NoHandlerFoundException.class})
+    public ResponseEntity<ErrorResponse> handleNotFound(Exception e) {
+        log.warn("存在しないパスへのアクセス: {}", e.getMessage());
+        return ResponseEntity
+                .status(HttpStatus.NOT_FOUND)
+                .body(new ErrorResponse("指定されたリソースが見つかりません"));
     }
 
     /**
