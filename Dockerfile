@@ -25,10 +25,8 @@ COPY application-core/build.gradle application-core/
 COPY infrastructure/build.gradle   infrastructure/
 COPY presentation/build.gradle     presentation/
 
-# gradle.properties の org.gradle.java.home は開発者の Windows ローカルパス
-# (C:/pleiades/...) を指しているため、コンテナ内では必ず除去する。
-RUN sed -i '/org\.gradle\.java\.home/d' gradle.properties \
- && chmod +x gradlew \
+# 依存ライブラリを先に解決してレイヤーキャッシュに載せる。
+RUN chmod +x gradlew \
  && ./gradlew --no-daemon --quiet :presentation:dependencies > /dev/null 2>&1 || true
 
 # --- ソース一式をコピーしてビルド ---
