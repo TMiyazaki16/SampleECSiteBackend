@@ -1,0 +1,51 @@
+# --- VCS ---
+.git
+.gitignore
+.gitattributes
+
+# --- ビルド成果物 / キャッシュ ---
+.gradle
+build
+*/build
+**/build
+out
+target
+*.class
+
+# --- IDE 設定 ---
+.vscode
+.idea
+*.iml
+*.iws
+*.ipr
+.settings
+.classpath
+.project
+
+# --- OS / ログ / 一時ファイル ---
+.DS_Store
+Thumbs.db
+*.log
+logs
+tmp
+
+# --- コンテナ関連 (イメージに含める必要がない) ---
+Dockerfile
+.dockerignore
+docker-compose*.yml
+
+# --- ドキュメント ---
+README.md
+docs
+*.md
+
+# --- Windows 用ラッパー (Linux コンテナでは不要) ---
+gradlew.bat
+
+# --- 秘匿情報が入りうるファイルは絶対にイメージへ入れない ---
+.env
+.env.*
+*.pem
+*.key
+*.p12
+*-key.json

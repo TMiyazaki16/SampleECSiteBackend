@@ -11,7 +11,8 @@ spring:
       data-locations: classpath:data.sql
   h2:
     console:
-      enabled: true
+      # 本番環境では H2_CONSOLE_ENABLED=false を設定してコンソールを無効化すること
+      enabled: ${H2_CONSOLE_ENABLED:true}
       path: /h2-console
       settings:
         web-allow-others: false
@@ -27,8 +28,14 @@ mybatis:
     log-impl: org.apache.ibatis.logging.slf4j.Slf4jImpl
 
 jwt:
-  secret: dGhpcy1pcy1hLXZlcnktbG9uZy1zZWNyZXQta2V5LWZvci1qd3QtdG9rZW4tZ2VuZXJhdGlvbg==
-  expiration-hours: 24
+  # 本番環境では必ず環境変数 JWT_SECRET（Base64 エンコード済み 32 バイト以上）で上書きすること
+  secret: ${JWT_SECRET:dGhpcy1pcy1hLXZlcnktbG9uZy1zZWNyZXQta2V5LWZvci1qd3QtdG9rZW4tZ2VuZXJhdGlvbg==}
+  expiration-hours: ${JWT_EXPIRATION_HOURS:24}
+
+app:
+  cors:
+    # 許可オリジンをカンマ区切りで指定する（例: https://www.tmiyazaki-works.com,https://storage.googleapis.com）
+    allowed-origins: ${ALLOWED_ORIGINS:http://localhost:5173}
 
 springdoc:
   swagger-ui:
@@ -37,7 +44,10 @@ springdoc:
     path: /v3/api-docs
 
 server:
-  port: 8080
+  # Cloud Run は環境変数 PORT でリッスンポートを指定する（未設定時は 8080）
+  port: ${PORT:8080}
+  # コンテナ外からのアクセスを受け付けるため全インターフェースで待ち受ける
+  address: 0.0.0.0
 
 logging:
   config: classpath:log4j2.xml
