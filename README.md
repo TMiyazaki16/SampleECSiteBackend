@@ -108,6 +108,9 @@ Gradle マルチプロジェクトで各レイヤーをモジュールとして�
 | ログ | Apache Log4j2 | (Boot 管理) |
 | ユーティリティ | Lombok | (Boot 管理) |
 | ビルド | Gradle Wrapper | 8.14.3 |
+| コンテナ | Docker (マルチステージビルド) | — |
+| ベースイメージ | Eclipse Temurin (JDK 21 / JRE 21) | 21 |
+| 実行基盤 | Google Cloud Run | — |
 
 ---
 
@@ -163,6 +166,8 @@ sample-ec-back/
 │       ├── message/                # MessageConfig (MessageSource Bean)
 │       └── util/                   # UuidUtil, DateTimeUtil
 │
+├── Dockerfile                      # 本番用イメージ定義 (ビルド: JDK / 実行: JRE の 2 ステージ)
+├── .dockerignore                   # イメージに含めないファイル
 ├── build.gradle                    # ルート Gradle 設定 (BOM・共通設定)
 ├── settings.gradle
 ├── gradle.properties               # org.gradle.java.home 設定
@@ -387,8 +392,10 @@ stock.insufficient=在庫が不足しています
 
 ### 前提条件
 
-- Java 21（`gradle.properties` に `org.gradle.java.home=C:/pleiades/2024-12/java/21` 設定済み）
-- Gradle Wrapper（`./gradlew`）を使用するためインストール不要
+| 用途 | 必要なもの |
+|------|-----------|
+| Docker で起動する場合 | Docker（Docker Desktop / Rancher Desktop など）のみ。Java のインストールは不要 |
+| Gradle で直接起動する場合 | Java 21（`gradle.properties` に `org.gradle.java.home` 設定済み）。Gradle は Wrapper (`./gradlew`) を使うためインストール不要 |
 
 ### 環境変数
 
@@ -406,7 +413,68 @@ stock.insufficient=在庫が不足しています
 openssl rand -base64 32
 ```
 
-### 起動
+> 鍵を変更すると発行済みの JWT は無効になり、再ログインが必要になる。開発中は同じ値を使い回すとよい。
+
+---
+
+## 13. 起動方法
+
+起動方法は 2 通りある。本番（Cloud Run）と同じ構成で確認したい場合は Docker を使う。
+
+| 方法 | 用途 |
+|------|------|
+| **A. Docker** | 本番と同一構成での動作確認。Java のインストール不要 |
+| **B. Gradle 直接起動** | コード変更を素早く反映したい開発時 |
+
+### A. Docker で起動する
+
+#### イメージのビルド
+
+```bash
+cd sample-ec-back
+docker build -t sample-ec-back .
+```
+
+初回はライブラリのダウンロードが入るため数分かかる。2 回目以降はレイヤーキャッシュが効くため数秒で完了する。
+
+#### 起動
+
+```bash
+docker run -d --name sample-ec-back -p 8080:8080 \
+  -e JWT_SECRET="$(openssl rand -base64 32)" \
+  -e ALLOWED_ORIGINS="http://localhost:5173" \
+  sample-ec-back
+```
+
+PowerShell の場合:
+
+```powershell
+$secret = [Convert]::ToBase64String((1..32 | ForEach-Object { Get-Random -Maximum 256 }))
+docker run -d --name sample-ec-back -p 8080:8080 `
+  -e JWT_SECRET="$secret" `
+  -e ALLOWED_ORIGINS="http://localhost:5173" `
+  sample-ec-back
+```
+
+#### 起動確認・ログ確認
+
+```bash
+docker ps                      # 起動中のコンテナ一覧
+docker logs -f sample-ec-back  # ログを追従表示（Ctrl+C で表示終了。コンテナは停止しない）
+```
+
+`Started EcApplication in X seconds` が出力されれば起動完了。
+
+#### 停止・削除
+
+```bash
+docker stop sample-ec-back     # 停止
+docker rm sample-ec-back       # 削除（同じ名前で再起動する場合は削除が必要）
+```
+
+> H2 はインメモリ DB のため、コンテナを停止するとデータは失われ、次回起動時に `data.sql` の初期状態へ戻る。
+
+### B. Gradle で直接起動する
 
 ```bash
 cd sample-ec-back
@@ -421,15 +489,9 @@ $env:JWT_SECRET = [Convert]::ToBase64String((1..32 | ForEach-Object { Get-Random
 ./gradlew :presentation:bootRun
 ```
 
-> 開発中は毎回同じ値を環境変数に設定しておくとよい。鍵を変更すると発行済みの JWT は無効になり、再ログインが必要になる。
+停止は `Ctrl+C`。
 
-### 起動中停止
-
-```
-Ctrl+C
-```
-
-### 起動確認
+ポートの使用状況を確認する場合（PowerShell）:
 
 ```powershell
 netstat -ano | findstr ":8080"
@@ -437,13 +499,67 @@ netstat -ano | findstr ":8080"
 
 `LISTENING` の行が表示されれば起動中、何も表示されなければ停止中。
 
-### 停止
+プロセスを強制停止する場合（PowerShell）:
 
 ```powershell
 netstat -ano | findstr ":8080" | findstr "LISTENING" | ForEach-Object { ($_ -split '\s+')[-1] } | ForEach-Object { Stop-Process -Id $_ -Force; Write-Host "停止しました (PID: $_)" }
 ```
 
 ---
+
+## 14. Google Cloud Run へのデプロイ
+
+### Dockerfile の構成
+
+ビルドと実行を分けたマルチステージ構成になっている。
+
+| ステージ | ベースイメージ | 役割 |
+|---------|--------------|------|
+| builder | `eclipse-temurin:21-jdk-jammy` | Gradle Wrapper で `:presentation:bootJar` を実行し JAR を生成 |
+| runtime | `eclipse-temurin:21-jre-jammy` | 生成された JAR のみを配置して起動（非 root ユーザー uid 1001） |
+
+実行ステージには JDK もソースコードも含まれないため、イメージサイズは約 465MB に収まる。
+
+補足事項:
+
+- `gradle.properties` の `org.gradle.java.home` はローカル環境固有のパスを指すため、コンテナ内では除去したうえでビルドしている（リポジトリのファイルは変更していない）
+- Cloud Run が送出する SIGTERM を JVM が直接受け取れるよう、`ENTRYPOINT` は `exec` 形式で起動している
+- JVM オプションに `-XX:MaxRAMPercentage=75.0 -XX:+UseSerialGC` を指定している。CPU を多く割り当てる構成に変更する場合は `UseSerialGC` の見直しを検討する
+
+### 署名鍵の登録（初回のみ）
+
+鍵が設定値として記録されないよう、Secret Manager 経由で渡す。
+
+```bash
+openssl rand -base64 32 | gcloud secrets create sample-ec-jwt-secret --data-file=-
+
+gcloud secrets add-iam-policy-binding sample-ec-jwt-secret \
+  --member="serviceAccount:<プロジェクト番号>-compute@developer.gserviceaccount.com" \
+  --role="roles/secretmanager.secretAccessor"
+```
+
+### デプロイ
+
+```bash
+gcloud run deploy sample-ec-back \
+  --source . \
+  --region asia-northeast1 \
+  --allow-unauthenticated \
+  --max-instances 1 \
+  --set-env-vars "ALLOWED_ORIGINS=https://www.tmiyazaki-works.com,H2_CONSOLE_ENABLED=false" \
+  --set-secrets "JWT_SECRET=sample-ec-jwt-secret:latest"
+```
+
+### 注意事項
+
+- **`--max-instances 1` を指定している**。H2 インメモリ DB はインスタンスごとに独立するため、複数インスタンスへスケールすると注文データなどに不整合が生じる。恒常運用する場合は Cloud SQL への移行が必要
+- データは永続化されない。インスタンスの再起動・スケールインのたびに初期状態へ戻る
+- `H2_CONSOLE_ENABLED=false` を必ず指定する。H2 コンソールは認証不要で公開されるため、有効のままでは誰でも DB を操作できてしまう
+- `PORT` は Cloud Run が自動的に注入するため指定不要
+
+---
+
+## 15. 動作確認
 
 ### H2 Database コンソール
 
@@ -454,6 +570,9 @@ http://localhost:8080/h2-console
 | JDBC URL | `jdbc:h2:mem:ecdb` |
 | User Name | `sa` |
 | Password | （空欄） |
+
+> `H2_CONSOLE_ENABLED=false` を指定して起動した場合は利用できない（本番環境では無効化すること）。
+> Docker で起動した場合も、コンテナ内の H2 にブラウザから接続できる。
 
 よく使う確認クエリ：
 
@@ -476,6 +595,21 @@ http://localhost:8080/swagger-ui.html
 2. レスポンスの `token` をコピー
 3. 画面右上の **Authorize 🔒** → `BearerAuth` にトークンを貼り付け → **Authorize**
 4. 各エンドポイントを試す
+
+---
+
+### curl での疎通確認
+
+```bash
+# ログインしてトークンを取得
+TOKEN=$(curl -s -X POST http://localhost:8080/api/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"email":"test@example.com","password":"password123"}' \
+  | python3 -c 'import sys,json; print(json.load(sys.stdin)["data"]["token"])')
+
+# 取得したトークンで商品一覧を取得
+curl -s http://localhost:8080/api/products -H "Authorization: Bearer $TOKEN"
+```
 
 ---
 
