@@ -36,7 +36,7 @@ jwt:
 
 app:
   cors:
-    # 許可オリジンをカンマ区切りで指定する（例: https://www.tmiyazaki-works.com,https://storage.googleapis.com）
+    # 許可オリジンをカンマ区切りで指定する（本番例: https://www.tmiyazaki-works.com）
     allowed-origins: ${ALLOWED_ORIGINS:http://localhost:5173}
 
 springdoc:

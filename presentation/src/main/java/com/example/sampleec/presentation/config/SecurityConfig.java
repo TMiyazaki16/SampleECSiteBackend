@@ -36,7 +36,7 @@ public class SecurityConfig {
     /**
      * CORS で許可するオリジン。
      * 環境変数 ALLOWED_ORIGINS にカンマ区切りで指定する。
-     * 例: ALLOWED_ORIGINS=https://www.tmiyazaki-works.com,https://storage.googleapis.com
+     * 例: ALLOWED_ORIGINS=https://www.tmiyazaki-works.com
      * 未設定時は application.yml の既定値（http://localhost:5173）が使われる。
      */
     @Value("${app.cors.allowed-origins}")
