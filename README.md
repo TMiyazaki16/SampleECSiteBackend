@@ -390,12 +390,38 @@ stock.insufficient=在庫が不足しています
 - Java 21（`gradle.properties` に `org.gradle.java.home=C:/pleiades/2024-12/java/21` 設定済み）
 - Gradle Wrapper（`./gradlew`）を使用するためインストール不要
 
+### 環境変数
+
+| 変数名 | 必須 | 既定値 | 説明 |
+|--------|------|--------|------|
+| `JWT_SECRET` | **必須** | なし | JWT 署名鍵。Base64 エンコード済み 32 バイト以上。**未設定の場合は起動時にエラーとなる** |
+| `PORT` | 任意 | `8080` | リッスンポート（Cloud Run では自動注入） |
+| `ALLOWED_ORIGINS` | 任意 | `http://localhost:5173` | CORS 許可オリジン。カンマ区切りで複数指定可 |
+| `JWT_EXPIRATION_HOURS` | 任意 | `24` | JWT の有効期間（時間） |
+| `H2_CONSOLE_ENABLED` | 任意 | `true` | H2 コンソールの有効化。**本番環境では `false` にすること** |
+
+署名鍵は鍵の漏洩を避けるためリポジトリに含めていない。以下のコマンドで生成する。
+
+```bash
+openssl rand -base64 32
+```
+
 ### 起動
 
 ```bash
 cd sample-ec-back
+JWT_SECRET="$(openssl rand -base64 32)" ./gradlew :presentation:bootRun
+```
+
+PowerShell の場合:
+
+```powershell
+cd sample-ec-back
+$env:JWT_SECRET = [Convert]::ToBase64String((1..32 | ForEach-Object { Get-Random -Maximum 256 }))
 ./gradlew :presentation:bootRun
 ```
+
+> 開発中は毎回同じ値を環境変数に設定しておくとよい。鍵を変更すると発行済みの JWT は無効になり、再ログインが必要になる。
 
 ### 起動中停止
 

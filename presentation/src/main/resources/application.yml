@@ -28,8 +28,10 @@ mybatis:
     log-impl: org.apache.ibatis.logging.slf4j.Slf4jImpl
 
 jwt:
-  # 本番環境では必ず環境変数 JWT_SECRET（Base64 エンコード済み 32 バイト以上）で上書きすること
-  secret: ${JWT_SECRET:dGhpcy1pcy1hLXZlcnktbG9uZy1zZWNyZXQta2V5LWZvci1qd3QtdG9rZW4tZ2VuZXJhdGlvbg==}
+  # 署名鍵。環境変数 JWT_SECRET での指定が必須（Base64 エンコード済み 32 バイト以上）。
+  # 鍵をリポジトリに残さないため既定値は持たせていない。未設定の場合は起動時にエラーとなる。
+  # 生成例: openssl rand -base64 32
+  secret: ${JWT_SECRET:}
   expiration-hours: ${JWT_EXPIRATION_HOURS:24}
 
 app:
