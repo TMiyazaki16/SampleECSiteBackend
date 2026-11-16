@@ -445,6 +445,12 @@ Java や Gradle のインストールは不要。ビルドから実行までコ�
 | `JWT_EXPIRATION_HOURS` | 任意 | `24` | JWT の有効期間（時間） |
 | `H2_CONSOLE_ENABLED` | 任意 | `true` | H2 コンソールの有効化。**本番環境では `false` にすること** |
 
+上表はアプリが解釈する環境変数とその既定値であり、設定する主体は環境によって異なる。
+
+- **ローカル / Docker 実行** — 上表のとおり自分で指定する
+- **本番（Cloud Run）** — `JWT_SECRET` / `ALLOWED_ORIGINS` / `H2_CONSOLE_ENABLED` は `sample-ec-infra` の Terraform が設定する。デプロイ時に `gcloud` 側から指定しない（「15. Google Cloud Run へのデプロイ」参照）
+- `PORT` は Cloud Run が自動注入するため、いずれの環境でも指定しない
+
 署名鍵は鍵の漏洩を避けるためリポジトリに含めていない。以下のコマンドで生成する。
 
 ```bash
@@ -629,12 +635,12 @@ VS Code の `launch.json` 設定例:
 
 ### 本番構成
 
-**Cloud Load Balancing + 独自ドメイン**（`https://www.tmiyazaki-works.com`）を採用する。
+**Cloud Load Balancing + 独自ドメイン**（`https://sample-ec-site.tmiyazaki-works.com`）を採用する。
 
 ルーティングは**パスベース**とし、フロントエンドと API を同一オリジンで配信する。
 
 ```
-                  https://www.tmiyazaki-works.com
+         https://sample-ec-site.tmiyazaki-works.com
                               │
                  ┌────────────▼────────────┐
                  │  Cloud Load Balancing   │
@@ -666,7 +672,7 @@ Cloud Storage から直接配信しない理由:
 
 ### 本番構成における CORS
 
-パスベース構成ではフロントエンドと API が同一オリジン（`https://www.tmiyazaki-works.com`）になるため、
+パスベース構成ではフロントエンドと API が同一オリジン（`https://sample-ec-site.tmiyazaki-works.com`）になるため、
 **本番環境ではブラウザの CORS 制約が発生しない。**
 
 ただし以下の理由から、`ALLOWED_ORIGINS` は設定しておくことを推奨する。
@@ -676,7 +682,7 @@ Cloud Storage から直接配信しない理由:
 - 将来ホストベース構成（例: `api.tmiyazaki-works.com`）へ変更する場合に備えるため
 
 ```
-ALLOWED_ORIGINS=https://www.tmiyazaki-works.com
+ALLOWED_ORIGINS=https://sample-ec-site.tmiyazaki-works.com
 ```
 
 ### フロントエンドの API ベース URL
@@ -712,32 +718,73 @@ VITE_API_BASE_URL=/api
 ### 署名鍵の登録（初回のみ）
 
 鍵が設定値として記録されないよう、Secret Manager 経由で渡す。
+シークレットの作成だけは手動で行う（Terraform は `data` で参照するのみ）。
 
 ```bash
 openssl rand -base64 32 | gcloud secrets create sample-ec-jwt-secret --data-file=-
-
-gcloud secrets add-iam-policy-binding sample-ec-jwt-secret \
-  --member="serviceAccount:<プロジェクト番号>-compute@developer.gserviceaccount.com" \
-  --role="roles/secretmanager.secretAccessor"
 ```
+
+> 読み取り権限の付与は `sample-ec-infra` の Terraform が行うため、手動での IAM 設定は不要。
+> Cloud Run サービスへの `JWT_SECRET` の紐づけも Terraform 側で定義されている。
 
 ### デプロイ
 
+Cloud Run のサービス定義（環境変数・シークレット・スケール上限・公開範囲）は
+`sample-ec-infra` の Terraform が管理している。
+本リポジトリから行うのは**コンテナイメージの差し替えのみ**で、新しいリビジョンを作る。
+
 ```bash
 gcloud run deploy sample-ec-back \
-  --source . \
-  --region asia-northeast1 \
-  --allow-unauthenticated \
-  --max-instances 1 \
-  --set-env-vars "ALLOWED_ORIGINS=https://www.tmiyazaki-works.com,H2_CONSOLE_ENABLED=false" \
-  --set-secrets "JWT_SECRET=sample-ec-jwt-secret:latest"
+  --image asia-northeast1-docker.pkg.dev/ec-site-handson/sample-ec/sample-ec-back:<タグ> \
+  --region asia-northeast1
 ```
+
+> ビルド済みイメージを指定する形が本来の手順。今後 GitHub Actions でビルドし、
+> そのイメージ URI を渡す運用を想定している。`<タグ>` は CI が付与する（コミットハッシュ等）。
+>
+> イメージを置く Artifact Registry リポジトリ（`asia-northeast1-docker.pkg.dev/ec-site-handson/sample-ec`）は
+> `sample-ec-infra` の Terraform 管理下にある。`terraform destroy` するとイメージごと消えるため、
+> 再構築した後は**デプロイの前にイメージのビルドと push をやり直す**必要がある。
+>
+> GitHub Actions から push するための権限設定（Workload Identity 連携と
+> `roles/artifactregistry.writer` の付与）は未実装。CI を組む段階でインフラ側が対応する。
+
+ローカルから手動でデプロイする場合も、イメージの置き場を分散させないため、
+同じ Artifact Registry リポジトリへビルドしてから反映する 2 段階の手順を踏む。
+
+```bash
+# 事前に gcloud auth login で認証しておく
+
+# ① 同じリポジトリへイメージをビルドして push
+gcloud builds submit \
+  --tag asia-northeast1-docker.pkg.dev/ec-site-handson/sample-ec/sample-ec-back:manual-$(date +%Y%m%d%H%M)
+
+# ② 作成したイメージでリビジョンを更新
+gcloud run deploy sample-ec-back \
+  --image <① で指定したタグ> \
+  --region asia-northeast1
+```
+
+> **`gcloud run deploy --source .` は使わないこと。**
+> `--source` は Cloud Build が自動作成する `cloud-run-source-deploy` リポジトリへ
+> push するため、イメージの置き場が 2 つに分かれる。このリポジトリは Terraform 管理外で
+> `terraform destroy` しても残り、気づかないまま保管料が発生し続ける。
+> またロールバック時に、対象リビジョンのイメージがどちらのリポジトリのものか追いにくい。
+
+> **`--set-env-vars` / `--set-secrets` / `--max-instances` / `--allow-unauthenticated` を付けないこと。**
+> これらは Terraform の管理対象で、`gcloud` 側から指定すると状態が乖離し、
+> 次回の `terraform apply` で巻き戻る。オプションを指定しなければ既存の設定は維持される。
+>
+> Terraform は Cloud Run の `image` を `lifecycle { ignore_changes }` の対象にしているため、
+> ここでデプロイしたイメージが `terraform apply` で初期イメージへ戻ることはない。
+
+設定そのものを変えたい場合は、`gcloud` ではなく `sample-ec-infra` 側を修正する。
 
 ### 注意事項
 
-- **`--max-instances 1` を指定している**。H2 インメモリ DB はインスタンスごとに独立するため、複数インスタンスへスケールすると注文データなどに不整合が生じる。恒常運用する場合は Cloud SQL への移行が必要
+- **最大インスタンス数を 1 に固定する必要がある**。H2 インメモリ DB はインスタンスごとに独立するため、複数インスタンスへスケールすると注文データなどに不整合が生じる。恒常運用する場合は Cloud SQL への移行が必要（設定は `sample-ec-infra` 側）
 - データは永続化されない。インスタンスの再起動・スケールインのたびに初期状態へ戻る
-- `H2_CONSOLE_ENABLED=false` を必ず指定する。H2 コンソールは認証不要で公開されるため、有効のままでは誰でも DB を操作できてしまう
+- **`H2_CONSOLE_ENABLED=false` が設定されている必要がある**。H2 コンソールは認証不要で公開されるため、有効のままでは誰でも DB を操作できてしまう（設定は `sample-ec-infra` 側）
 - `PORT` は Cloud Run が自動的に注入するため指定不要
 - **Cloud Load Balancing のカスタムエラーレスポンスポリシーを `/api/*` に適用しないこと。**
   フロントエンドは SPA のため、404 時に `index.html` を 200 で返すポリシーをバケット側（`/*`）に設定する。
@@ -922,11 +969,11 @@ H2 インメモリ DB のため、コンテナを停止するとデータは失�
 | 制約 | 内容 | 影響 |
 |------|------|------|
 | データが永続化されない | H2 インメモリ DB を使用 | 再起動・スケールインのたびに初期状態へ戻る |
-| 水平スケールできない | DB がインスタンスごとに独立する | Cloud Run では `--max-instances 1` が必要。恒常運用には Cloud SQL への移行が必要 |
+| 水平スケールできない | DB がインスタンスごとに独立する | インフラ側（`sample-ec-infra`）で `max_instance_count = 1` に固定している。恒常運用には Cloud SQL への移行が必要で、それまでこの固定は解除できない |
 | ログアウトがサーバー側で機能しない | `POST /api/auth/logout` は `success: true` を返すのみ | ログアウト後もトークンの控えがあれば有効期限内は使用できる。実際のログアウトはフロントエンドがトークンを破棄することで成立している |
 | トークンを即時失効できない | ステートレスな JWT を採用しているため | 最大 24 時間（`JWT_EXPIRATION_HOURS`）有効なまま。即時失効が必要な場合は有効期間の短縮 + リフレッシュトークンの併用が必要 |
 | ヘルスチェック用エンドポイントがない | Spring Boot Actuator 未導入 | Cloud Run は既定の TCP チェックで起動を判定するため現状は支障なし。詳細な死活監視が必要なら Actuator の導入を検討 |
-| H2 コンソールが認証なしで公開される | Spring Security で `permitAll` 設定 | **本番環境では必ず `H2_CONSOLE_ENABLED=false` を指定すること** |
+| H2 コンソールが認証なしで公開される | Spring Security で `permitAll` 設定 | **インフラ側（`sample-ec-infra`）で `H2_CONSOLE_ENABLED=false` を設定している。** アプリ側の既定値は `true` のため、この設定が外れると誰でも DB を操作できる |
 
 ---
 
