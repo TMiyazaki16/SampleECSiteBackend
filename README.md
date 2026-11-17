@@ -739,15 +739,41 @@ gcloud run deploy sample-ec-back \
   --region asia-northeast1
 ```
 
-> ビルド済みイメージを指定する形が本来の手順。今後 GitHub Actions でビルドし、
-> そのイメージ URI を渡す運用を想定している。`<タグ>` は CI が付与する（コミットハッシュ等）。
+> ビルド済みイメージを指定する形が本来の手順。通常は GitHub Actions が
+> この手順を自動実行する（後述「GitHub Actions による自動デプロイ」）。`<タグ>` はコミットハッシュ。
 >
 > イメージを置く Artifact Registry リポジトリ（`asia-northeast1-docker.pkg.dev/ec-site-handson/sample-ec`）は
 > `sample-ec-infra` の Terraform 管理下にある。`terraform destroy` するとイメージごと消えるため、
 > 再構築した後は**デプロイの前にイメージのビルドと push をやり直す**必要がある。
+
+### GitHub Actions による自動デプロイ
+
+`.github/workflows/deploy-backend.yml` が、`main` への push（および手動実行）を契機に
+イメージのビルド → Artifact Registry への push → Cloud Run のリビジョン更新までを行う。
+
+| ステップ | 内容 |
+|---------|------|
+| Authenticate to Google Cloud | Workload Identity 連携で短期認証情報を取得（鍵ファイルは使わない） |
+| Configure Docker credential helper | `gcloud auth configure-docker asia-northeast1-docker.pkg.dev` |
+| Build / Push image | 直下の `Dockerfile` でビルドし、`<コミットハッシュ>` と `latest` の 2 タグを push |
+| Deploy to Cloud Run | `gcloud run deploy --image <...>:<コミットハッシュ> --region asia-northeast1` |
+| Show deployed revision | `gcloud run services describe` で反映されたリビジョンと URL を表示 |
+
+GitHub の Settings → Secrets and variables → Actions → **Variables** に以下を登録しておく
+（秘密情報ではないため Secrets ではなく Variables）。
+
+| 変数名 | 値 |
+|-------|-----|
+| `GCP_WIF_PROVIDER` | Workload Identity Provider のリソース名 |
+| `GCP_DEPLOY_SA` | `github-actions-back@ec-site-handson.iam.gserviceaccount.com` |
+
+> デプロイ用サービスアカウントの権限は `roles/artifactregistry.writer` /
+> `roles/run.developer` / `roles/iam.serviceAccountUser` の 3 つのみ。
+> Cloud Build の権限は無いため、`gcloud builds submit` や
+> `gcloud run deploy --source .` は CI からは使えない（ビルドはランナー上の `docker build`）。
 >
-> GitHub Actions から push するための権限設定（Workload Identity 連携と
-> `roles/artifactregistry.writer` の付与）は未実装。CI を組む段階でインフラ側が対応する。
+> ロールバックはコミットハッシュのタグを指定して `gcloud run deploy` する。
+> `latest` は最新を指すだけなのでロールバック先には使わない。
 
 ローカルから手動でデプロイする場合も、イメージの置き場を分散させないため、
 同じ Artifact Registry リポジトリへビルドしてから反映する 2 段階の手順を踏む。

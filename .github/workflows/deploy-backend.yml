@@ -1,0 +1,92 @@
+# =====================================================================
+# Cloud Run への自動デプロイ
+#
+# main への push（および手動実行）で、リポジトリ直下の Dockerfile から
+# イメージをビルドし、Artifact Registry へ push して Cloud Run の
+# リビジョンを更新する。
+#
+# 変更するのはコンテナイメージだけ。環境変数・シークレット・スケール・
+# 公開範囲・実行サービスアカウントは sample-ec-infra の Terraform 管理のため、
+# gcloud run deploy にそれらのオプションを付けないこと。
+# =====================================================================
+name: Deploy to Cloud Run
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# 同一ブランチのデプロイが重ならないようにする（後発を優先し、実行中は中断しない）
+concurrency:
+  group: deploy-cloud-run
+  cancel-in-progress: false
+
+env:
+  PROJECT_ID: ec-site-handson
+  REGION: asia-northeast1
+  SERVICE: sample-ec-back
+  REGISTRY: asia-northeast1-docker.pkg.dev
+  IMAGE: asia-northeast1-docker.pkg.dev/ec-site-handson/sample-ec/sample-ec-back
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    # id-token: write が無いと GitHub が OIDC トークンを発行せず、
+    # Workload Identity 連携による認証に失敗する。
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Workload Identity 連携で短期の認証情報を取得する（鍵ファイルは使わない）
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_DEPLOY_SA }}
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ env.PROJECT_ID }}
+
+      # docker push が Artifact Registry へ認証できるよう、認証ヘルパーを登録する
+      - name: Configure Docker credential helper
+        run: gcloud auth configure-docker ${{ env.REGISTRY }} --quiet
+
+      # Gradle ビルド（bootJar）は Dockerfile の builder ステージ内で行うため、
+      # ワークフロー側では Java / Gradle のセットアップは不要。
+      # Cloud Build は権限を持たないので、必ずランナー上の docker build を使う。
+      - name: Build image
+        run: |
+          docker build \
+            -t "${IMAGE}:${GITHUB_SHA}" \
+            -t "${IMAGE}:latest" \
+            .
+
+      # sha タグ = 追跡・ロールバック用、latest タグ = 最新リビジョンの目印
+      - name: Push image
+        run: |
+          docker push "${IMAGE}:${GITHUB_SHA}"
+          docker push "${IMAGE}:latest"
+
+      # イメージのみを差し替える。--set-env-vars / --set-secrets /
+      # --max-instances / --min-instances / --allow-unauthenticated /
+      # --service-account / --port は Terraform 管理のため指定しない。
+      - name: Deploy to Cloud Run
+        run: |
+          gcloud run deploy "${SERVICE}" \
+            --image "${IMAGE}:${GITHUB_SHA}" \
+            --region "${REGION}" \
+            --quiet
+
+      # 反映されたリビジョンと URL を確認する（読み取りのみ）
+      - name: Show deployed revision
+        run: |
+          gcloud run services describe "${SERVICE}" \
+            --region "${REGION}" \
+            --format 'value(status.latestReadyRevisionName, status.url)'
