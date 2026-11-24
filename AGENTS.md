@@ -49,7 +49,7 @@ docker compose down -v          # DB を完全に初期化する
 - ホットリロードは未対応。コードを変えたら `docker compose up -d --build api` で入れ直す
 - `build.gradle` を変えたときやビルド結果が不審なときは `docker compose build --no-cache api`
 - `JWT_SECRET` は必須。未設定だと compose の起動自体が失敗する
-- アプリ単体では起動しない。MySQL 8.0 が必要なので `docker run` ではなく `docker compose` を使う
+- アプリ単体では起動しない。MySQL 8.4 が必要なので `docker run` ではなく `docker compose` を使う
 
 ## 実装の前提
 
@@ -59,7 +59,8 @@ docker compose down -v          # DB を完全に初期化する
 - **トランザクション**: 境界は `ApplicationService` の `@Transactional`。Controller や Repository に置かない
 - **楽観ロック**: 在庫更新は `version` 一致と在庫充足を `WHERE` 句で判定し、更新 0 行なら 409 を返す。この条件を外さない。複数商品を更新するときは商品 ID 順にソートしてアクセス順序を揃える
 - **ログ**: Log4j2。`MdcFilter` が付与する Correlation ID (`%X{correlationId}`) を前提にしたパターンを壊さない。`System.out.println` を使わない
-- **DB は MySQL 8.0**: ローカルは docker-compose（TCP 接続）、本番は Cloud SQL（インフラ側の apply が未実行のため本番デプロイは不可）。スキーマ・初期データの適用は Flyway が起動時に行う
+- **DB は MySQL 8.4**: ローカルは docker-compose（TCP 接続）、本番は Cloud SQL（稼働中。`main` への push で自動デプロイされる）。スキーマ・初期データの適用は Flyway が起動時に行う。インフラ側の Terraform は `MYSQL_8_4` へ変更済みだが apply 前のため、稼働中インスタンスは 8.0 のまま（どちらでも動作確認済み）
+- **Flyway は 9.22.3（Boot 3.2.5 の BOM）のまま上げない**: MySQL 8.4 では「newer than this version of Flyway」の WARN が 1 行出るが、エラーではなく動作に影響しない。警告を消すには flyway-mysql 11.15.0 以降が必要だが、Boot が Flyway 10 系を取り込んだのは 3.3 からで、3.2 系で上書きすると `flywayInitializer` が起動に失敗する
 - **本番の DB 接続は Cloud SQL Java Connector 経由**: Connector/J は Unix ドメインソケットをネイティブにサポートしないため、`/cloudsql` のソケットへ直接つなぐ実装にしない。`com.google.cloud.sql:mysql-socket-factory-connector-j-8` のバージョンは Boot の BOM 管理外なので、明示指定を外さない
 - **Flyway マイグレーション**: `presentation/src/main/resources/db/migration/` 配下。適用済みの `V1__` は編集せず `V2__` 以降を足す（チェックサム検証で起動に失敗する）。初期データ `R__seed_data.sql` は再適用されるため、INSERT は必ず `ON DUPLICATE KEY UPDATE` 付きで書く
 

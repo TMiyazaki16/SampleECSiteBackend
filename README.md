@@ -51,7 +51,7 @@ work/
 │             │               │
 │             ▼               │
 │  ┌──────────────────┐      │
-│  │   MySQL 8.0      │      │
+│  │   MySQL 8.4      │      │
 │  └──────────────────┘      │
 └─────────────────────────────┘
 ```
@@ -120,7 +120,7 @@ Gradle マルチプロジェクトで各レイヤーをモジュールとして�
 | 認証トークン | jjwt | 0.12.6 |
 | バリデーション | Spring Validation (Hibernate Validator) | 8.0.x |
 | ORM | MyBatis Spring Boot Starter | 3.0.3 |
-| DB | MySQL (Cloud SQL / ローカルは Docker) | 8.0 |
+| DB | MySQL (Cloud SQL / ローカルは Docker) | 8.4 (LTS) |
 | DB マイグレーション | Flyway | (Boot 管理) |
 | 本番 DB 接続 | Cloud SQL Java Connector | 1.31.1 |
 | API ドキュメント | springdoc-openapi | 2.4.0 |
@@ -354,7 +354,7 @@ WHERE id = #{id}
 ### デッドロック対策
 
 - `ApplicationService` 内で複数商品の在庫を更新する際は、商品 ID 順にソートしてアクセス順序を統一
-- MySQL 8.0 (InnoDB) は行ロックを取るため、更新順序が揃っていないと実際にデッドロックが起こりうる。上記のソートはその回避策として必須
+- MySQL 8.4 (InnoDB) は行ロックを取るため、更新順序が揃っていないと実際にデッドロックが起こりうる。上記のソートはその回避策として必須
 
 ---
 
@@ -400,7 +400,7 @@ stock.insufficient=在庫が不足しています
 
 ### インテグレーションテスト
 
-- `@SpringBootTest` + Testcontainers で本番と同じ MySQL 8.0 を立ち上げて実施
+- `@SpringBootTest` + Testcontainers で本番と同じ MySQL 8.4 を立ち上げて実施
 - Flyway の `V1__create_tables.sql` / `R__seed_data.sql` がそのまま適用されるため、
   本番と同一のスキーマ・初期データで検証できる
 - H2 は廃止済みのため、インメモリ DB での代替は行わない（方言差で検証の意味が薄れるため）
@@ -450,7 +450,7 @@ Java や Gradle、MySQL のインストールは不要。ビルドから実行�
 | `PORT` | 任意 | `8080` | リッスンポート（Cloud Run では自動注入） |
 | `ALLOWED_ORIGINS` | 任意 | `http://localhost:5173` | CORS 許可オリジン。カンマ区切りで複数指定可 |
 | `JWT_EXPIRATION_HOURS` | 任意 | `24` | JWT の有効期間（時間） |
-| `SPRING_DATASOURCE_URL` | 任意 | `jdbc:mysql://localhost:3306/ecdb` | DB の JDBC URL。ローカルは TCP、本番は Cloud SQL への Unix ドメインソケット接続 |
+| `SPRING_DATASOURCE_URL` | 任意 | `jdbc:mysql://localhost:3306/ecdb` | DB の JDBC URL。ローカルは TCP、本番は Cloud SQL Java Connector 経由（「15. デプロイ」参照） |
 | `SPRING_DATASOURCE_USERNAME` | 任意 | `ecuser` | DB 接続ユーザー |
 | `SPRING_DATASOURCE_PASSWORD` | 任意 | 空 | DB 接続パスワード。**本番は Secret Manager から注入する** |
 
@@ -1040,7 +1040,8 @@ JWT_SECRET="$(openssl rand -base64 32)" docker compose up --build
 
 | 制約 | 内容 | 影響 |
 |------|------|------|
-| 本番の DB がまだ存在しない | アプリ側は MySQL 移行済みだが、インフラ側の Cloud SQL 構築が未着手 | 現状のイメージは本番へデプロイしても DB へ接続できず起動に失敗する。インフラ側の対応（Notion「05_02」Phase 3）が完了するまで本番デプロイは行わない |
+| 本番 DB の自動バックアップが無効 | Cloud SQL の `backupConfiguration.enabled` が `false`。ポイントインタイム復旧（バイナリログ）も無効 | 本番 DB の復旧手段が存在しない。平時 `terraform destroy` する運用（案 A）かつ `deletion_protection = false` のため、インスタンスごと失われるとデータは戻らない。インフラ側の管轄 |
+| ローカルと本番で MySQL のバージョンが一時的に食い違う | ローカルは 8.4。インフラ側の Terraform も `MYSQL_8_4` へ変更済みだが apply 前のため、稼働中インスタンスは 8.0 のまま | スキーマ・SQL とも 8.0 / 8.4 の双方で動作確認済みのため実害はない。インフラ側の次の apply（destroy → apply）で解消する |
 | テストコードが未整備 | 自動テストを 1 件も実装していない | 回帰検知ができず、変更の影響は手動確認に頼っている。**残課題として、「11. テスト方針」に記載した方針に沿って順次整備する**（Unit / Mock / Testcontainers によるインテグレーション / Repository の 4 層） |
 | ログアウトがサーバー側で機能しない | `POST /api/auth/logout` は `success: true` を返すのみ | ログアウト後もトークンの控えがあれば有効期限内は使用できる。実際のログアウトはフロントエンドがトークンを破棄することで成立している |
 | トークンを即時失効できない | ステートレスな JWT を採用しているため | 最大 24 時間（`JWT_EXPIRATION_HOURS`）有効なまま。即時失効が必要な場合は有効期間の短縮 + リフレッシュトークンの併用が必要 |

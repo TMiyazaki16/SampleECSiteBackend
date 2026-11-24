@@ -1,7 +1,7 @@
 # =====================================================================
 # サンプルEC サイト バックエンド 本番用 Dockerfile (Google Cloud Run 向け)
 #
-# このイメージは外部の MySQL 8.0 を必要とする（アプリ内に DB は持たない）。
+# このイメージは外部の MySQL 8.4 を必要とする（アプリ内に DB は持たない）。
 # ローカルでは docker-compose.yml から MySQL ごと起動するのが前提:
 #   JWT_SECRET="$(openssl rand -base64 32)" docker compose up --build
 #
