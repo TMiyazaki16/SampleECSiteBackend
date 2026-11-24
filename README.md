@@ -122,6 +122,7 @@ Gradle マルチプロジェクトで各レイヤーをモジュールとして�
 | ORM | MyBatis Spring Boot Starter | 3.0.3 |
 | DB | MySQL (Cloud SQL / ローカルは Docker) | 8.0 |
 | DB マイグレーション | Flyway | (Boot 管理) |
+| 本番 DB 接続 | Cloud SQL Java Connector | 1.31.1 |
 | API ドキュメント | springdoc-openapi | 2.4.0 |
 | ログ | Apache Log4j2 | (Boot 管理) |
 | ユーティリティ | Lombok | (Boot 管理) |
@@ -819,7 +820,15 @@ gcloud run deploy sample-ec-back \
 
 ### 注意事項
 
-- **本イメージは Cloud SQL (MySQL) が用意されるまで本番へデプロイできない。** アプリ側の MySQL 移行は完了しているが、インフラ側（`sample-ec-infra`）の Cloud SQL 構築は未着手のため、現状デプロイしても DB へ接続できず起動に失敗する。インフラ側の対応内容は Notion「05_02_【Step5】DB の Cloud SQL（MySQL）移行計画」の Phase 3 を参照
+- **本イメージは Cloud SQL (MySQL) が用意されるまで本番へデプロイできない。** インフラ側（`sample-ec-infra`）の `terraform apply` が未実行のため、現状デプロイしても DB へ接続できず起動に失敗する。インフラ側の対応内容は Notion「05_02_【Step5】DB の Cloud SQL（MySQL）移行計画」の Phase 3 を参照
+- **本番では Cloud SQL Java Connector 経由で接続する。** Connector/J は Unix ドメインソケットをネイティブにサポートしないため、Cloud Run がマウントする `/cloudsql/<インスタンス接続名>` のソケットへ Java から直接つなぐことはできない（[Google 公式ドキュメント](https://docs.cloud.google.com/sql/docs/mysql/connect-run)も Java については本 Connector の使用を案内している）。そのため Cloud Run 側の `volumes` / `volume_mounts` によるソケットマウントは不要
+- Connector は起動時に Cloud SQL Admin API を呼んで接続先を解決するため、**`sqladmin.googleapis.com` の有効化と実行サービスアカウントへの `roles/cloudsql.client` 付与が必須**（いずれもインフラ側の管轄）
+- 本番の `SPRING_DATASOURCE_URL` は次の形式になる。
+  ```
+  jdbc:mysql:///ecdb?cloudSqlInstance=<インスタンス接続名>&socketFactory=com.google.cloud.sql.mysql.SocketFactory&cloudSqlRefreshStrategy=lazy
+  ```
+  `cloudSqlRefreshStrategy=lazy` は Cloud Run・App Engine Standard・Cloud Functions で推奨される設定。既定の `background` のままだと、CPU がスロットリングされる環境で接続情報の更新が機能しないことがある
+- ローカル（docker-compose）は TCP 接続のため Connector は使われない。**同一のコンテナイメージのまま、環境変数の違いだけで両方の接続方式に対応している**
 - **`SPRING_DATASOURCE_URL` / `_USERNAME` / `_PASSWORD` の 3 つを Terraform 側で設定する必要がある**。パスワードは Secret Manager から注入する（`JWT_SECRET` と同じ方式）
 - **最大インスタンス数の 1 固定は Cloud SQL 移行後に解除できる**。固定の理由だった「DB がインスタンスごとに独立する」という制約がなくなるため（解除の判断と設定は `sample-ec-infra` 側）
 - `PORT` は Cloud Run が自動的に注入するため指定不要

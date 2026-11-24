@@ -59,7 +59,8 @@ docker compose down -v          # DB を完全に初期化する
 - **トランザクション**: 境界は `ApplicationService` の `@Transactional`。Controller や Repository に置かない
 - **楽観ロック**: 在庫更新は `version` 一致と在庫充足を `WHERE` 句で判定し、更新 0 行なら 409 を返す。この条件を外さない。複数商品を更新するときは商品 ID 順にソートしてアクセス順序を揃える
 - **ログ**: Log4j2。`MdcFilter` が付与する Correlation ID (`%X{correlationId}`) を前提にしたパターンを壊さない。`System.out.println` を使わない
-- **DB は MySQL 8.0**: ローカルは docker-compose、本番は Cloud SQL（インフラ側は未構築のため本番デプロイは不可）。スキーマ・初期データの適用は Flyway が起動時に行う
+- **DB は MySQL 8.0**: ローカルは docker-compose（TCP 接続）、本番は Cloud SQL（インフラ側の apply が未実行のため本番デプロイは不可）。スキーマ・初期データの適用は Flyway が起動時に行う
+- **本番の DB 接続は Cloud SQL Java Connector 経由**: Connector/J は Unix ドメインソケットをネイティブにサポートしないため、`/cloudsql` のソケットへ直接つなぐ実装にしない。`com.google.cloud.sql:mysql-socket-factory-connector-j-8` のバージョンは Boot の BOM 管理外なので、明示指定を外さない
 - **Flyway マイグレーション**: `presentation/src/main/resources/db/migration/` 配下。適用済みの `V1__` は編集せず `V2__` 以降を足す（チェックサム検証で起動に失敗する）。初期データ `R__seed_data.sql` は再適用されるため、INSERT は必ず `ON DUPLICATE KEY UPDATE` 付きで書く
 
 ## AI開発ルール

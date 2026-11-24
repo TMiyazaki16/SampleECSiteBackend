@@ -31,6 +31,20 @@ dependencies {
 
     // MySQL JDBC ドライバ
     runtimeOnly 'com.mysql:mysql-connector-j'
+
+    // Cloud SQL Java Connector (本番のみ使用)
+    //
+    // Connector/J は Unix ドメインソケットをネイティブにサポートしないため、
+    // Cloud Run がマウントする /cloudsql のソケットへは Java から直接つなげない。
+    // Google も Java については本 Connector の使用を案内している。
+    // https://docs.cloud.google.com/sql/docs/mysql/connect-run
+    //
+    // 起動時に Cloud SQL Admin API を呼んで接続先を解決するため、実行サービス
+    // アカウントに roles/cloudsql.client と sqladmin API の有効化が必要（インフラ側の管轄）。
+    // ローカル (docker-compose) は TCP 接続のため、この依存は使われない。
+    //
+    // バージョンは Spring Boot の BOM に含まれないため明示する。
+    runtimeOnly 'com.google.cloud.sql:mysql-socket-factory-connector-j-8:1.31.1'
 }
 
 bootRun {
