@@ -1,12 +1,19 @@
 # =====================================================================
 # サンプルEC サイト バックエンド 本番用 Dockerfile (Google Cloud Run 向け)
 #
-# ビルド例:
+# このイメージは外部の MySQL 8.0 を必要とする（アプリ内に DB は持たない）。
+# ローカルでは docker-compose.yml から MySQL ごと起動するのが前提:
+#   JWT_SECRET="$(openssl rand -base64 32)" docker compose up --build
+#
+# 単体で起動する場合は接続先を環境変数で渡す:
 #   docker build -t sample-ec-back .
 #   docker run --rm -p 8080:8080 \
 #     -e PORT=8080 \
 #     -e ALLOWED_ORIGINS="https://www.tmiyazaki-works.com" \
 #     -e JWT_SECRET="<base64 エンコードされた 32 バイト以上の秘密鍵>" \
+#     -e SPRING_DATASOURCE_URL="jdbc:mysql://<host>:3306/ecdb" \
+#     -e SPRING_DATASOURCE_USERNAME="<user>" \
+#     -e SPRING_DATASOURCE_PASSWORD="<password>" \
 #     sample-ec-back
 # =====================================================================
 

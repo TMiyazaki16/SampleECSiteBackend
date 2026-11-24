@@ -1,0 +1,62 @@
+# =====================================================================
+# ローカル開発用 Docker Compose
+#
+# MySQL 8.0 とバックエンド API をまとめて起動する。
+# 本番（Cloud Run → Cloud SQL）と同じコンテナイメージを使い、
+# 接続情報だけを環境変数で切り替える。
+#
+# 事前に .env を一度だけ作る（JWT_SECRET を含むため .gitignore 済み）:
+#   echo "JWT_SECRET=$(openssl rand -base64 32)" > .env
+#
+# 起動:
+#   docker compose up --build
+#
+# .env を置いておくと logs / ps / down など他のサブコマンドも引数なしで使える。
+# =====================================================================
+
+services:
+  db:
+    # Cloud SQL 側のバージョンと揃える（どちらも MySQL 8.0）
+    image: mysql:8.0
+    container_name: sample-ec-db
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpassword
+      MYSQL_DATABASE: ecdb
+      MYSQL_USER: ecuser
+      MYSQL_PASSWORD: ecpassword
+      TZ: UTC
+    ports:
+      # ホストから MySQL クライアントで覗けるように公開する
+      - "3306:3306"
+    volumes:
+      - db-data:/var/lib/mysql
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+    healthcheck:
+      # アプリは MySQL が受付可能になってから起動させる
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-p$$MYSQL_ROOT_PASSWORD"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+
+  api:
+    build: .
+    container_name: sample-ec-back
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      # サービス名 db で名前解決される。Flyway が起動時にマイグレーションを適用する。
+      SPRING_DATASOURCE_URL: jdbc:mysql://db:3306/ecdb?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC
+      SPRING_DATASOURCE_USERNAME: ecuser
+      SPRING_DATASOURCE_PASSWORD: ecpassword
+      # 未設定だと起動時にエラーで落ちるため、必ず渡すこと
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is not set. Run - echo "JWT_SECRET=$(openssl rand -base64 32)" > .env}
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:5173}
+    ports:
+      - "8080:8080"
+
+volumes:
+  db-data:

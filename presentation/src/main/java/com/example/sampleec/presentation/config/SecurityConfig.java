@@ -52,14 +52,10 @@ public class SecurityConfig {
                 // セッションレス（JWT 使用のため）
                 .sessionManagement(session ->
                         session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
-                // H2 コンソールのフレーム表示を許可
-                .headers(headers ->
-                        headers.frameOptions(frame -> frame.sameOrigin()))
                 // エンドポイントごとのアクセス制御
                 .authorizeHttpRequests(auth -> auth
                         // 認証不要エンドポイント
                         .requestMatchers("/api/auth/login").permitAll()
-                        .requestMatchers("/h2-console/**").permitAll()
                         .requestMatchers("/swagger-ui/**", "/swagger-ui.html",
                                 "/v3/api-docs/**", "/v3/api-docs").permitAll()
                         .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()

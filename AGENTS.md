@@ -37,20 +37,19 @@ system-common     → （なし）
 docker run --rm -v "$PWD":/workspace -w /workspace \
   eclipse-temurin:21-jdk-jammy sh ./gradlew --no-daemon build
 
-# イメージのビルドと起動
-docker build -t sample-ec-back .
-docker run -d --name sample-ec-back -p 8080:8080 \
-  -e JWT_SECRET="$(openssl rand -base64 32)" \
-  -e ALLOWED_ORIGINS="http://localhost:5173" \
-  sample-ec-back
+# MySQL ごと起動する（事前に .env へ JWT_SECRET を置く。.gitignore 済み）
+#   echo "JWT_SECRET=$(openssl rand -base64 32)" > .env
+docker compose up -d --build
 
-docker logs -f sample-ec-back   # `Started EcApplication in X seconds` で起動完了
-docker rm -f sample-ec-back     # 停止・削除（同名で起動し直すには削除が必要）
+docker compose logs -f api      # `Started EcApplication in X seconds` で起動完了
+docker compose down             # 停止・削除（DB のデータはボリュームに残る）
+docker compose down -v          # DB を完全に初期化する
 ```
 
-- ホットリロードは未対応。コードを変えたら再ビルドして起動し直す
-- `build.gradle` を変えたときやビルド結果が不審なときは `--no-cache` で再ビルドする
-- `JWT_SECRET` は必須。未設定だと起動時にエラーで落ちる
+- ホットリロードは未対応。コードを変えたら `docker compose up -d --build api` で入れ直す
+- `build.gradle` を変えたときやビルド結果が不審なときは `docker compose build --no-cache api`
+- `JWT_SECRET` は必須。未設定だと compose の起動自体が失敗する
+- アプリ単体では起動しない。MySQL 8.0 が必要なので `docker run` ではなく `docker compose` を使う
 
 ## 実装の前提
 
@@ -60,7 +59,8 @@ docker rm -f sample-ec-back     # 停止・削除（同名で起動し直すに�
 - **トランザクション**: 境界は `ApplicationService` の `@Transactional`。Controller や Repository に置かない
 - **楽観ロック**: 在庫更新は `version` 一致と在庫充足を `WHERE` 句で判定し、更新 0 行なら 409 を返す。この条件を外さない。複数商品を更新するときは商品 ID 順にソートしてアクセス順序を揃える
 - **ログ**: Log4j2。`MdcFilter` が付与する Correlation ID (`%X{correlationId}`) を前提にしたパターンを壊さない。`System.out.println` を使わない
-- **H2 インメモリ DB**: データは永続化されず、水平スケールもできない。アプリが単一インスタンス前提である点はインフラ側の設定（スケール上限）と対になっているため、永続化や並行処理が要る変更は先に相談する
+- **DB は MySQL 8.0**: ローカルは docker-compose、本番は Cloud SQL（インフラ側は未構築のため本番デプロイは不可）。スキーマ・初期データの適用は Flyway が起動時に行う
+- **Flyway マイグレーション**: `presentation/src/main/resources/db/migration/` 配下。適用済みの `V1__` は編集せず `V2__` 以降を足す（チェックサム検証で起動に失敗する）。初期データ `R__seed_data.sql` は再適用されるため、INSERT は必ず `ON DUPLICATE KEY UPDATE` 付きで書く
 
 ## AI開発ルール
 
@@ -72,7 +72,7 @@ docker rm -f sample-ec-back     # 停止・削除（同名で起動し直すに�
 - モジュール間の依存関係を変える変更、新しいモジュールの追加
 - 新しい依存ライブラリの追加、Spring Boot / Java のバージョン変更
 - 認証・認可まわりの変更（`SecurityConfig` の `permitAll` 追加、JWT の検証ロジック、CORS 許可オリジンの拡大）
-- DB スキーマ（`schema.sql`）・初期データ（`data.sql`）の変更。再起動で初期状態に戻るため影響が見えにくい
+- DB スキーマ・初期データの変更（`db/migration/` 配下）。永続 DB に対する破壊的変更になりうるため影響が見えにくい
 - 公開 API のパス・リクエスト/レスポンス形式の変更。フロントエンドの修正が連動して必要になる
 - 依頼スコープを超える変更（無関係なレイヤのリファクタ、フロントエンド・インフラリポジトリの変更）
 - 3 ファイル以上または複数モジュールにまたがる変更 → 先に計画（変更対象 / README の更新要否 / 検証方針 / リスク）を提示する
@@ -92,7 +92,7 @@ docker rm -f sample-ec-back     # 停止・削除（同名で起動し直すに�
 1. `./gradlew build` が成功する（上記の Docker 経由で実行）
 2. 変更したモジュールの依存方向が崩れていない
 3. API を追加・変更したら `@Valid` と Request DTO の制約、OpenAPI 上の表示を確認する
-4. エンドポイント・環境変数・制約を変えたら `README.md`（「API 一覧」「12. セットアップ方法」「18. 既知の制約」）を更新する
+4. エンドポイント・環境変数・制約を変えたら `README.md`（「API 一覧」「12. セットアップ方法」「13. 起動方法」「18. 既知の制約」）を更新する
 5. フロントエンドに影響する変更は、`SampleECSite` 側で必要になる対応を報告に書く
 
 ### 報告

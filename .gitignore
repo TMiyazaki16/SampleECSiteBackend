@@ -11,3 +11,6 @@ out/
 target/
 .DS_Store
 *.log
+
+# ローカル開発用の環境変数（JWT_SECRET などを含むためコミットしない）
+.env

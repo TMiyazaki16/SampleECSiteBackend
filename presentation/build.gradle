@@ -25,8 +25,12 @@ dependencies {
     // OpenAPI / Swagger UI
     implementation 'org.springdoc:springdoc-openapi-starter-webmvc-ui:2.4.0'
 
-    // H2 (開発・テスト用)
-    runtimeOnly 'com.h2database:h2'
+    // DB マイグレーション (起動時に db/migration 配下の未適用 SQL を自動実行)
+    implementation 'org.flywaydb:flyway-core'
+    runtimeOnly 'org.flywaydb:flyway-mysql'
+
+    // MySQL JDBC ドライバ
+    runtimeOnly 'com.mysql:mysql-connector-j'
 }
 
 bootRun {

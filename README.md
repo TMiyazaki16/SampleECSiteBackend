@@ -51,7 +51,7 @@ work/
 │             │               │
 │             ▼               │
 │  ┌──────────────────┐      │
-│  │  H2 (インメモリ)  │      │
+│  │   MySQL 8.0      │      │
 │  └──────────────────┘      │
 └─────────────────────────────┘
 ```
@@ -120,7 +120,8 @@ Gradle マルチプロジェクトで各レイヤーをモジュールとして�
 | 認証トークン | jjwt | 0.12.6 |
 | バリデーション | Spring Validation (Hibernate Validator) | 8.0.x |
 | ORM | MyBatis Spring Boot Starter | 3.0.3 |
-| DB | H2 Database (インメモリ) | — |
+| DB | MySQL (Cloud SQL / ローカルは Docker) | 8.0 |
+| DB マイグレーション | Flyway | (Boot 管理) |
 | API ドキュメント | springdoc-openapi | 2.4.0 |
 | ログ | Apache Log4j2 | (Boot 管理) |
 | ユーティリティ | Lombok | (Boot 管理) |
@@ -172,8 +173,9 @@ SampleECSiteBackend/
 │           └── response/           # レスポンス DTO
 │   └── src/main/resources/
 │       ├── application.yml
-│       ├── schema.sql
-│       ├── data.sql
+│       ├── db/migration/          # Flyway マイグレーション
+│       │   ├── V1__create_tables.sql   # スキーマ定義（適用後は編集しない）
+│       │   └── R__seed_data.sql        # 初期データ（繰り返し適用）
 │       ├── log4j2.xml
 │       └── messages.properties
 │
@@ -351,7 +353,7 @@ WHERE id = #{id}
 ### デッドロック対策
 
 - `ApplicationService` 内で複数商品の在庫を更新する際は、商品 ID 順にソートしてアクセス順序を統一
-- H2 インメモリ DB のため、本番相当のデッドロックは発生しないが、設計としてのガイドを踏襲
+- MySQL 8.0 (InnoDB) は行ロックを取るため、更新順序が揃っていないと実際にデッドロックが起こりうる。上記のソートはその回避策として必須
 
 ---
 
@@ -381,7 +383,9 @@ stock.insufficient=在庫が不足しています
 
 ## 11. テスト方針
 
-> 本プロジェクトはサンプル実装のためテストコードは含まないが、以下の方針で実装することを想定している。
+> **現時点でテストコードは未整備である。** 本節に書かれているのは実装済みの内容ではなく、
+> 今後整備していく際の方針である。テストコードの作成は**残課題**として扱う
+> （「18. 既知の制約」参照）。
 
 ### Unit Test
 
@@ -393,14 +397,16 @@ stock.insufficient=在庫が不足しています
 - `@WebMvcTest` で Controller 層のみをロードし、Application Service を `@MockBean` で差し替え
 - リクエストの Validation・レスポンス形式・HTTP ステータスを検証
 
-### H2 Database を使ったテスト
+### インテグレーションテスト
 
-- `@SpringBootTest` + H2 インメモリ DB でインテグレーションテストを実施
-- `schema.sql` / `data.sql` で再現性のある初期状態を確保
+- `@SpringBootTest` + Testcontainers で本番と同じ MySQL 8.0 を立ち上げて実施
+- Flyway の `V1__create_tables.sql` / `R__seed_data.sql` がそのまま適用されるため、
+  本番と同一のスキーマ・初期データで検証できる
+- H2 は廃止済みのため、インメモリ DB での代替は行わない（方言差で検証の意味が薄れるため）
 
 ### Repository Test
 
-- `@MybatisTest` で MyBatis Mapper と XML マッパーを H2 上で動作確認
+- `@MybatisTest` で MyBatis Mapper と XML マッパーを MySQL 上で動作確認
 - 楽観ロック UPDATE（0 行更新ケース）や IN 句一括取得を重点テスト
 
 ### テストの実行方法
@@ -431,9 +437,9 @@ docker run --rm -v "${PWD}:/workspace" -w /workspace `
 
 ### 前提条件
 
-- **Docker**（Docker Desktop / Rancher Desktop など）のみ
+- **Docker**（Docker Desktop / Rancher Desktop など）のみ。`docker compose` が使えること
 
-Java や Gradle のインストールは不要。ビルドから実行までコンテナ内で完結するため、開発環境による差異が生じない。
+Java や Gradle、MySQL のインストールは不要。ビルドから実行までコンテナ内で完結するため、開発環境による差異が生じない。
 
 ### 環境変数
 
@@ -443,12 +449,14 @@ Java や Gradle のインストールは不要。ビルドから実行までコ�
 | `PORT` | 任意 | `8080` | リッスンポート（Cloud Run では自動注入） |
 | `ALLOWED_ORIGINS` | 任意 | `http://localhost:5173` | CORS 許可オリジン。カンマ区切りで複数指定可 |
 | `JWT_EXPIRATION_HOURS` | 任意 | `24` | JWT の有効期間（時間） |
-| `H2_CONSOLE_ENABLED` | 任意 | `true` | H2 コンソールの有効化。**本番環境では `false` にすること** |
+| `SPRING_DATASOURCE_URL` | 任意 | `jdbc:mysql://localhost:3306/ecdb` | DB の JDBC URL。ローカルは TCP、本番は Cloud SQL への Unix ドメインソケット接続 |
+| `SPRING_DATASOURCE_USERNAME` | 任意 | `ecuser` | DB 接続ユーザー |
+| `SPRING_DATASOURCE_PASSWORD` | 任意 | 空 | DB 接続パスワード。**本番は Secret Manager から注入する** |
 
 上表はアプリが解釈する環境変数とその既定値であり、設定する主体は環境によって異なる。
 
 - **ローカル / Docker 実行** — 上表のとおり自分で指定する
-- **本番（Cloud Run）** — `JWT_SECRET` / `ALLOWED_ORIGINS` / `H2_CONSOLE_ENABLED` は `sample-ec-infra` の Terraform が設定する。デプロイ時に `gcloud` 側から指定しない（「15. Google Cloud Run へのデプロイ」参照）
+- **本番（Cloud Run）** — `JWT_SECRET` / `ALLOWED_ORIGINS` / `SPRING_DATASOURCE_*` は `sample-ec-infra` の Terraform が設定する。デプロイ時に `gcloud` 側から指定しない（「15. Google Cloud Run へのデプロイ」参照）
 - `PORT` は Cloud Run が自動注入するため、いずれの環境でも指定しない
 
 署名鍵は鍵の漏洩を避けるためリポジトリに含めていない。以下のコマンドで生成する。
@@ -463,81 +471,84 @@ openssl rand -base64 32
 
 ## 13. 起動方法
 
-### イメージのビルド
+アプリ単体では動作しない。**MySQL と一緒に `docker compose` で起動する。**
+
+### ビルドと起動
 
 ```bash
 cd SampleECSiteBackend
-docker build -t sample-ec-back .
-```
-
-初回はライブラリのダウンロードが入るため数分かかる。2 回目以降はレイヤーキャッシュが効くため 10 秒程度で完了する。
-
-### 起動
-
-```bash
-docker run -d --name sample-ec-back -p 8080:8080 \
-  -e JWT_SECRET="$(openssl rand -base64 32)" \
-  -e ALLOWED_ORIGINS="http://localhost:5173" \
-  sample-ec-back
+JWT_SECRET="$(openssl rand -base64 32)" docker compose up --build
 ```
 
 PowerShell の場合:
 
 ```powershell
-$secret = [Convert]::ToBase64String((1..32 | ForEach-Object { Get-Random -Maximum 256 }))
-docker run -d --name sample-ec-back -p 8080:8080 `
-  -e JWT_SECRET="$secret" `
-  -e ALLOWED_ORIGINS="http://localhost:5173" `
-  sample-ec-back
+$env:JWT_SECRET = [Convert]::ToBase64String((1..32 | ForEach-Object { Get-Random -Maximum 256 }))
+docker compose up --build
 ```
+
+初回はライブラリのダウンロードと MySQL イメージの取得が入るため数分かかる。2 回目以降はレイヤーキャッシュが効く。
+
+`db` サービスのヘルスチェックが通ってから `api` サービスが起動するため、MySQL の起動待ちを自分で入れる必要はない。
+起動時に **Flyway が `db/migration` 配下の未適用 SQL を自動適用する**ので、マイグレーションの手動実行も不要。
 
 ### 起動確認・ログ確認
 
 ```bash
-docker ps                      # 起動中のコンテナ一覧
-docker logs -f sample-ec-back  # ログを追従表示（Ctrl+C で表示終了。コンテナは停止しない）
+docker compose ps              # サービスの状態一覧
+docker compose logs -f api     # API のログを追従表示（Ctrl+C で表示終了。コンテナは停止しない）
 ```
 
 `Started EcApplication in X seconds` が出力されれば起動完了。
+Flyway のログに `Successfully applied 2 migrations` が出ていれば、スキーマと初期データの投入も完了している。
+
+`/api/products` は認証必須のため、動作確認はログインしてトークンを取得してから行う（「16. 動作確認」参照）。
 
 ### 停止・削除
 
 ```bash
-docker stop sample-ec-back     # 停止
-docker rm sample-ec-back       # 削除（同じ名前で再起動する場合は削除が必要）
+docker compose stop            # 停止（データは残る）
+docker compose down            # 停止してコンテナを削除（データは残る）
+docker compose down -v         # ボリュームごと削除し、DB を完全に初期化する
 ```
 
-> H2 はインメモリ DB のため、コンテナを停止するとデータは失われ、次回起動時に `data.sql` の初期状態へ戻る。
+> MySQL のデータは名前付きボリューム `db-data` に永続化される。コンテナを停止してもデータは残るため、
+> **初期状態に戻したいときは `docker compose down -v` を使う**。
 
 ### コード変更の反映
 
 ホットリロードには対応していないため、コードを変更した場合はイメージを再ビルドして起動し直す。
 
 ```bash
-docker rm -f sample-ec-back
-docker build -t sample-ec-back .
-docker run -d --name sample-ec-back -p 8080:8080 \
-  -e JWT_SECRET="$(openssl rand -base64 32)" \
-  sample-ec-back
+JWT_SECRET="$(openssl rand -base64 32)" docker compose up --build api
 ```
 
 > ソースコードのみの変更であれば依存解決のレイヤーはキャッシュが効くため、再ビルドは 10 秒程度で完了する。
+> DB を落とす必要はないため、`api` サービスだけを指定すればよい。
 
 依存ライブラリ（`build.gradle`）を変更した場合や、ビルド結果が不審な場合はキャッシュを使わず再ビルドする。
 
 ```bash
-docker build --no-cache -t sample-ec-back .
+docker compose build --no-cache api
 ```
 
-### ポート 8080 が使用中の場合
+### マイグレーションを追加するとき
 
-`-p` の左側（ホスト側ポート）を変更する。コンテナ内のポートは 8080 のままでよい。
+- スキーマ変更は `presentation/src/main/resources/db/migration/V2__xxx.sql` のように**連番で新規ファイルを足す**
+- **適用済みの `V1__` は編集しない。** Flyway がチェックサムで検証するため、後から変えると既存 DB で起動に失敗する
+- 初期データ（`R__seed_data.sql`）は内容が変わるたびに再適用される。
+  **追加する INSERT も必ず `ON DUPLICATE KEY UPDATE` 付きで書くこと**（素の INSERT は 2 回目の適用で主キー重複になる）
+
+### DB に直接接続したいとき
 
 ```bash
-docker run -d --name sample-ec-back -p 18080:8080 \
-  -e JWT_SECRET="$(openssl rand -base64 32)" \
-  -e ALLOWED_ORIGINS="http://localhost:5173" \
-  sample-ec-back
+docker compose exec db mysql -u ecuser -pecpassword ecdb
+```
+
+### ポートが使用中の場合
+
+`docker-compose.yml` の `ports` の左側（ホスト側ポート）を変更する。コンテナ内のポートはそのままでよい。
+API が `8080`、MySQL が `3306` を使う。
 ```
 
 > この場合 API は `http://localhost:18080` で待ち受ける。
@@ -808,9 +819,9 @@ gcloud run deploy sample-ec-back \
 
 ### 注意事項
 
-- **最大インスタンス数を 1 に固定する必要がある**。H2 インメモリ DB はインスタンスごとに独立するため、複数インスタンスへスケールすると注文データなどに不整合が生じる。恒常運用する場合は Cloud SQL への移行が必要（設定は `sample-ec-infra` 側）
-- データは永続化されない。インスタンスの再起動・スケールインのたびに初期状態へ戻る
-- **`H2_CONSOLE_ENABLED=false` が設定されている必要がある**。H2 コンソールは認証不要で公開されるため、有効のままでは誰でも DB を操作できてしまう（設定は `sample-ec-infra` 側）
+- **本イメージは Cloud SQL (MySQL) が用意されるまで本番へデプロイできない。** アプリ側の MySQL 移行は完了しているが、インフラ側（`sample-ec-infra`）の Cloud SQL 構築は未着手のため、現状デプロイしても DB へ接続できず起動に失敗する。インフラ側の対応内容は Notion「05_02_【Step5】DB の Cloud SQL（MySQL）移行計画」の Phase 3 を参照
+- **`SPRING_DATASOURCE_URL` / `_USERNAME` / `_PASSWORD` の 3 つを Terraform 側で設定する必要がある**。パスワードは Secret Manager から注入する（`JWT_SECRET` と同じ方式）
+- **最大インスタンス数の 1 固定は Cloud SQL 移行後に解除できる**。固定の理由だった「DB がインスタンスごとに独立する」という制約がなくなるため（解除の判断と設定は `sample-ec-infra` 側）
 - `PORT` は Cloud Run が自動的に注入するため指定不要
 - **Cloud Load Balancing のカスタムエラーレスポンスポリシーを `/api/*` に適用しないこと。**
   フロントエンドは SPA のため、404 時に `index.html` を 200 で返すポリシーをバケット側（`/*`）に設定する。
@@ -834,18 +845,23 @@ gcloud run services logs tail sample-ec-back --region asia-northeast1
 
 ## 16. 動作確認
 
-### H2 Database コンソール
+### DB の中身を確認する
 
-http://localhost:8080/h2-console
+ブラウザから使える DB コンソールは廃止した（H2 コンソールは認証なしで公開されるリスクがあったため）。
+MySQL クライアントをコンテナ経由で起動して確認する。
+
+```bash
+docker compose exec db mysql -u ecuser -pecpassword ecdb
+```
 
 | 項目 | 値 |
 |------|----|
-| JDBC URL | `jdbc:h2:mem:ecdb` |
-| User Name | `sa` |
-| Password | （空欄） |
+| ホスト / ポート | `localhost:3306`（ホストからも接続可） |
+| データベース | `ecdb` |
+| User Name | `ecuser` |
+| Password | `ecpassword` |
 
-> `H2_CONSOLE_ENABLED=false` を指定して起動した場合は利用できない（本番環境では無効化すること）。
-> Docker で起動した場合も、コンテナ内の H2 にブラウザから接続できる。
+> 上記はローカル専用の資格情報で、`docker-compose.yml` に直書きしてある。本番の資格情報は Secret Manager 管理。
 
 よく使う確認クエリ：
 
@@ -853,6 +869,9 @@ http://localhost:8080/h2-console
 SELECT id, name, stock, version FROM products;
 SELECT * FROM orders;
 SELECT oi.*, p.name FROM order_items oi JOIN products p ON oi.product_id = p.id;
+
+-- 適用済みマイグレーションの履歴
+SELECT installed_rank, version, description, success FROM flyway_schema_history;
 ```
 
 ---
@@ -981,10 +1000,28 @@ TOKEN=$(curl -s -X POST http://localhost:8080/api/auth/login \
 curl -i http://localhost:8080/api/nonexistent -H "Authorization: Bearer $TOKEN"
 ```
 
-### データが消えている
+### データが消えている / 初期状態に戻したい
 
-H2 インメモリ DB のため、コンテナを停止するとデータは失われる（仕様）。
-次回起動時に `data.sql` の初期状態へ戻る。
+MySQL のデータは名前付きボリューム `db-data` に永続化されるため、`docker compose stop` や `down` では消えない。
+意図的に初期状態へ戻すときは、ボリュームごと削除してから起動し直す。
+
+```bash
+docker compose down -v
+JWT_SECRET="$(openssl rand -base64 32)" docker compose up --build
+```
+
+### 起動時に Flyway のエラーで落ちる
+
+既存 DB に適用済みのマイグレーションを後から編集すると、チェックサム不一致で起動に失敗する
+（`Migration checksum mismatch for migration version 1`）。
+
+適用済みの `V1__` は編集せず、`V2__` 以降を足して変更する。ローカルで作業中に `V1__` を直してしまった場合は、
+`docker compose down -v` で DB を作り直せば解消する。
+
+### DB に接続できない（`Communications link failure`）
+
+`api` は `db` のヘルスチェック通過後に起動するが、MySQL の初回起動は 30 秒ほどかかる。
+`docker compose logs db` で `ready for connections` が出ているかを確認する。
 
 ---
 
@@ -994,12 +1031,12 @@ H2 インメモリ DB のため、コンテナを停止するとデータは失�
 
 | 制約 | 内容 | 影響 |
 |------|------|------|
-| データが永続化されない | H2 インメモリ DB を使用 | 再起動・スケールインのたびに初期状態へ戻る |
-| 水平スケールできない | DB がインスタンスごとに独立する | インフラ側（`sample-ec-infra`）で `max_instance_count = 1` に固定している。恒常運用には Cloud SQL への移行が必要で、それまでこの固定は解除できない |
+| 本番の DB がまだ存在しない | アプリ側は MySQL 移行済みだが、インフラ側の Cloud SQL 構築が未着手 | 現状のイメージは本番へデプロイしても DB へ接続できず起動に失敗する。インフラ側の対応（Notion「05_02」Phase 3）が完了するまで本番デプロイは行わない |
+| テストコードが未整備 | 自動テストを 1 件も実装していない | 回帰検知ができず、変更の影響は手動確認に頼っている。**残課題として、「11. テスト方針」に記載した方針に沿って順次整備する**（Unit / Mock / Testcontainers によるインテグレーション / Repository の 4 層） |
 | ログアウトがサーバー側で機能しない | `POST /api/auth/logout` は `success: true` を返すのみ | ログアウト後もトークンの控えがあれば有効期限内は使用できる。実際のログアウトはフロントエンドがトークンを破棄することで成立している |
 | トークンを即時失効できない | ステートレスな JWT を採用しているため | 最大 24 時間（`JWT_EXPIRATION_HOURS`）有効なまま。即時失効が必要な場合は有効期間の短縮 + リフレッシュトークンの併用が必要 |
 | ヘルスチェック用エンドポイントがない | Spring Boot Actuator 未導入 | Cloud Run は既定の TCP チェックで起動を判定するため現状は支障なし。詳細な死活監視が必要なら Actuator の導入を検討 |
-| H2 コンソールが認証なしで公開される | Spring Security で `permitAll` 設定 | **インフラ側（`sample-ec-infra`）で `H2_CONSOLE_ENABLED=false` を設定している。** アプリ側の既定値は `true` のため、この設定が外れると誰でも DB を操作できる |
+| DB マイグレーションのロールバック手段がない | Flyway Community 版には `undo` がない | スキーマを戻すには打ち消す `V(n+1)__` を自分で書く必要がある |
 
 ---
 
